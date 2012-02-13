@@ -311,7 +311,7 @@ subroutine readgendf(fname,energy,sigt,sigel,chi,sigf,vsigf,signxn,sigdis,sigs,s
     endif
 
     ! inelastic scattering
-    if (present(sigs) .and. matl/=1001) then
+    if (present(sigs) .and. matl/=1001 .and. matl/=2004) then
         !find first inelastic cross section
         call find(6,51,a,mat,mf,mt,nsp)
 
@@ -406,7 +406,7 @@ subroutine find(imf,imt,a,mat,mf,mt,nsp)
             eof = .true.
             rewind(unit=8)
         elseif (io<0 .and. eof) then
-            write(*,*) mf,mt,'not found on GENDF tape'
+            write(*,*) imf,imt,'not found on GENDF tape'
             stop
         endif
         100 format (6E11.0,I4,I2,I3,I5)

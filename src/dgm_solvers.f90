@@ -2,6 +2,7 @@ module dgm_solvers
 use nuclear_data
 use coarse_group_type
 use solvers
+!use IFPORT
 
 contains
 
@@ -21,11 +22,12 @@ subroutine dgm_infinite_medium(xsdat,matl)
     
     type(xs_data) :: xsDGM
 
-    integer, parameter :: max_DGM_steps = 100
+    integer, parameter :: max_DGM_steps = 40
     integer :: DGM_steps
     real(kind=8), dimension(0:max_DGM_steps) :: k_stored
     real(kind=8), dimension(coarse_groups) :: f_0
-    real(kind=8) :: rms,avg,mre
+    real(kind=8) :: rms,avg,mre,ref1,ref2,gp1,gp2
+    real(kind=8) :: f_cont
 
     call allocate_xsdata(xsDGM, coarse_groups, upsc_groups)
     
@@ -39,17 +41,48 @@ subroutine dgm_infinite_medium(xsdat,matl)
     enddo
     
     
-    ! k_inf = 1.0
-    ! flux = 1.0
-    ! flux = flux/sum(flux)
-    
+    ! guess flux of 1/E + Maxwellian + fission
     k_inf = 1.0
     do i=1,groups
-        flux(1,i)=1/(energy(i)*xsdat(matl)%sigt(i))
+        ! flux(1,i)=1
+!~         flux(1,i) = (energy(i)-energy(i+1))/energy(i)
+        flux(1,i)=(energy(i)-energy(i+1))/ & 
+            & (.5*(energy(i)*xsdat(matl)%sigt(i))+energy(i+1)*xsdat(matl)%sigt(i+1))
+!~         
+        if (energy(i)>1.999e5) then
+            flux(1,i)=xsdat(matl)%chi(i)*(energy(i)-energy(i+1)) & 
+                & /(.5*(energy(i)*xsdat(matl)%sigt(i))+energy(i+1)*xsdat(matl)%sigt(i+1))
+            ! if (i==2202) write(*,*) energy(i)
+        endif
+        ! if (i>=14243) then
+        if (energy(i)<=.2066) then
+            ! flux(1,i)=.5*(energy(i)+energy(i+1))* &
+                 ! & exp(-.5*(energy(i)+energy(i+1))/.0253)*(energy(i)-energy(i+1))
+
+            flux(1,i) = -.0253*(exp(-energy(i)/.0253)*(.0253+energy(i)) - &
+                & exp(-energy(i+1)/.0253)*(.0253+energy(i+1)))
+
+        endif
     enddo
+    
+!~     do i=1,groups
+!~         flux(1,i)=rand()
+!~     enddo
+    
+!~     f_cont = flux(2203,1)/flux(2202,1)
+!~     flux(1:2202,1)=flux(1:2202,1)*f_cont
+!~     f_cont = flux(14662,1)/flux(14663,1)
+!~     flux(14663:14767,1)=flux(14663:14767,1)*f_cont
+    
     flux=flux/sum(flux)
+!~     write(*,*) minval(flux),maxval(flux)
 
     k_stored(0) = k_inf
+    
+    open(unit=33,file='iter_flux',status='replace',action='write')
+    do i=1,groups
+        write(33,*) flux(1,i)
+    enddo
 
     call start_timer()
     DGM_loop: do DGM_steps=1,max_DGM_steps
@@ -83,6 +116,9 @@ subroutine dgm_infinite_medium(xsdat,matl)
 
             
             xsDGM%sigt(g) = CG(g)%sigt0(1) + CG(g)%delta(1,0,1)
+!~             if (isnan(xsDGM%sigt(g))) then
+!~                 if (isnan(CG(g)%scal_flux(1))) write(*,*) g
+!~             endif
             xsDGM%vsigf(g) = CG(g)%vsigf(1)
             
             xsDGM%chi(g) = CG(g)%chi(1,0)
@@ -184,6 +220,26 @@ subroutine dgm_infinite_medium(xsdat,matl)
         mre=mre/groups
         write(*,*) '    mre = ', mre
         
+        do i=1,groups
+            write(33,*) flux(1,i)
+        enddo
+        
+        ! calculate group reaction rates error
+        ref1 = 0
+        ref2 = 0
+        gp1 = 0
+        gp2 = 0
+        do g=1,groups
+            if (energy(g)>=0.625) then
+                ref1 = ref1+phi(g)*xsdat(matl)%sigt(g)
+                gp1 = gp1+flux(1,g)*xsdat(matl)%sigt(g)
+            else
+                ref2 = ref2+phi(g)*xsdat(matl)%sigt(g)
+                gp2 = gp2+flux(1,g)*xsdat(matl)%sigt(g)
+            endif
+        enddo
+        write(*,*) '    gp1 = ', (gp1-ref1)/ref1
+        write(*,*) '    gp2 = ', (gp2-ref2)/ref2
         
         k_stored(DGM_steps) = k_inf
         if (abs(k_stored(DGM_steps)-k_stored(DGM_steps-1))<1e-6) then
@@ -194,11 +250,7 @@ subroutine dgm_infinite_medium(xsdat,matl)
     enddo DGM_loop
 
 
-    ! open(unit=21, file='phi', action='write', status='replace')
-    ! do i=1,groups
-        ! write(21,*) flux(1,i)
-    ! enddo
-    ! close(unit=21)
+    close(unit=33)
 
 
 end subroutine dgm_infinite_medium
@@ -235,7 +287,7 @@ subroutine dgm_sn(xsdat,meshes,width,matl,angles,BC,diff_scheme)
     real(kind=8) :: denom
     integer :: smu
     
-    integer :: i,ii,j,g,region,angle
+    integer :: i,ii,j,g,region,angle,mesh,K
     
     !------------------------!
     ! allocate data          !
@@ -248,13 +300,13 @@ subroutine dgm_sn(xsdat,meshes,width,matl,angles,BC,diff_scheme)
     enddo
     allocate(delta(regions,coarse_groups,angles))
     allocate(flux(sum(meshes),groups), aflux(sum(meshes)+1,groups,angles))
-    allocate(reg_flux(regions,groups), reg_aflux(regions,groups,angles))
+    allocate(reg_flux(regions,groups), reg_aflux(regions+1,groups,angles))
     allocate(dgm_flux(sum(meshes),coarse_groups), dgm_aflux(sum(meshes)+1,coarse_groups,angles))
     allocate(regID(sum(meshes)),matID(sum(meshes)))
     allocate(Q_f0(sum(meshes)),Q_f(sum(meshes)),Q_ds(sum(meshes)),Q_us(sum(meshes)),Q(sum(meshes)))
     
     do g=1,coarse_groups
-        allocate(CG(g)%scal_flux(regions),CG(g)%ang_flux(regions,0:CG(g)%N-1,angles))
+        allocate(CG(g)%scal_flux(regions),CG(g)%ang_flux(regions+1,0:CG(g)%N-1,angles))
         allocate(CG(g)%vsigf(regions), CG(g)%sigt0(regions), CG(g)%delta(regions,0:CG(g)%N-1,angles))
         allocate(CG(g)%chi(regions,0:CG(g)%N-1),CG(g)%sig_dn(regions,0:CG(g)%N-1,CG(g)%index))
         if (g>coarse_groups-upsc_groups) then
@@ -264,6 +316,12 @@ subroutine dgm_sn(xsdat,meshes,width,matl,angles,BC,diff_scheme)
     
     allocate(alpha(angles), A(sum(meshes),angles),B(sum(meshes),angles))
     allocate(dx(size(meshes)))
+
+    ! check if compatible
+    if (sum(meshes) /= regions) then
+        write(*,*) 'Multiple meshes per region not supported with DGM SN solver'
+        stop
+    endif
 
     !------------------------!
     ! weights and angles     !
@@ -383,6 +441,9 @@ subroutine dgm_sn(xsdat,meshes,width,matl,angles,BC,diff_scheme)
     
     call sn_solver(xsDGM,meshes,width,(/(i,i=1,regions)/),angles,BC,diff_scheme,k_eff,dgm_aflux,dgm_flux,delta)
     
+    do g=1,coarse_groups
+        CG(g)%ang_flux(:,0,:) = dgm_aflux(:,g,:)
+    enddo
     
     
     !------------------------!
@@ -421,7 +482,7 @@ subroutine dgm_sn(xsdat,meshes,width,matl,angles,BC,diff_scheme)
                     enddo
                 endif
             enddo
-            Q = .5*(Q_f + Q_ds + Q_us)
+            Q = .5*(Q_f + Q_ds + Q_us)  
             
             ! compute coefficients
             do angle=1,angles
@@ -439,35 +500,55 @@ subroutine dgm_sn(xsdat,meshes,width,matl,angles,BC,diff_scheme)
                 enddo               
             enddo
             
-            ! loop through negative angles
-            do angle=1,angles/2
-                ! boundary flux
-                dgm_aflux(sum(meshes)+1,g,angle)=BC(2)*dgm_aflux(sum(meshes)+1,g,angles-angle+1)
-                
-                ! interior fluxes
-                do i=sum(meshes),1,-1                    
-                    ! solve for next mesh point
-                    dgm_aflux(i,g,angle)=A(i,angle)*dgm_aflux(i+1,g,angle) & 
-                        & + B(i,angle)*(Q(i)-CG(g)%delta(regID(i),j,angle)*dgm_aflux(i,g,angle))
+            bc_iter: do ii=1,100
+            
+                    
+                ! loop through negative angles
+                do angle=1,angles/2
+                    ! boundary flux
+                    dgm_aflux(sum(meshes)+1,g,angle)=BC(2)*dgm_aflux(sum(meshes)+1,g,angles-angle+1)
+                    
+                    ! interior fluxes
+                    do i=sum(meshes),1,-1                    
+                        ! solve for next mesh point
+                        dgm_aflux(i,g,angle)=A(i,angle)*dgm_aflux(i+1,g,angle) & 
+                            & + B(i,angle)*(Q(i)-CG(g)%delta(regID(i),j,angle)*CG(g)%ang_flux(i,0,angle))
+                    enddo
+                    
                 enddo
                 
-            enddo
-            
-            ! loop through positive angles
-            do angle=angles/2+1,angles
-                ! boundary flux
-                dgm_aflux(1,g,angle)=BC(1)*dgm_aflux(1,g,angles-angle+1)
+                ! loop through positive angles
+                do angle=angles/2+1,angles
+                    ! boundary flux
+                    dgm_aflux(1,g,angle)=BC(1)*dgm_aflux(1,g,angles-angle+1)
+                    
+                    ! interior fluxes
+                    do i=1,sum(meshes)                    
+                        ! solve for next mesh point
+                        dgm_aflux(i+1,g,angle)=A(i,angle)*dgm_aflux(i,g,angle) & 
+                            & + B(i,angle)*(Q(i)-CG(g)%delta(regID(i),j,angle)*CG(g)%ang_flux(i,0,angle))                       
+                    enddo                
+                enddo
                 
-                ! interior fluxes
-                do i=1,sum(meshes)                    
-                    ! solve for next mesh point
-                    dgm_aflux(i+1,g,angle)=A(i,angle)*dgm_aflux(i,g,angle) & 
-                        & + B(i,angle)*(Q(i)-CG(g)%delta(regID(i),j,angle)*dgm_aflux(i,g,angle))                       
-                enddo                
-            enddo
+            enddo bc_iter
+            
+            CG(g)%ang_flux(:,j,:) = dgm_aflux(:,g,:)
             
         enddo moment_sweep
     enddo group_sweep
+    
+    
+    
+    do g=1,coarse_groups
+        call condense_flux_moments(CG(g),aflux)
+    enddo
+    
+    do i=1,sum(meshes)
+!~         write(*,*) CG(1)%ang_flux(i,29,1)
+        write(*,*) aflux(i,1,1), reg_aflux(i,1,1), aflux(i,1,1)/reg_aflux(i,1,1)
+    enddo
+    
+    
     
 end subroutine dgm_sn
 

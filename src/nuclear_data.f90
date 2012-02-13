@@ -1,7 +1,7 @@
 module nuclear_data
 use parameters
 use parsing_utilities
-use timer
+use dgm_timer
 
 !permanent nuclear data
 type xs_data
@@ -9,7 +9,7 @@ type xs_data
     real(kind=8), dimension(:), allocatable :: chi
     real(kind=8), dimension(:,:), allocatable :: sig_up
     real(kind=8), dimension(:), allocatable :: sig_dn
-    integer :: groups, maxup, maxscat
+    integer(kind=8) :: groups, maxup, maxscat
 end type
 
 real(kind=8), dimension(:), allocatable :: phi
@@ -71,11 +71,11 @@ subroutine output_data_ascii(xsdat)
     enddo
 
     do i=1,maxscat
-        ! write(52,*) xsdat%sig_dn(i)
+        write(52,*) xsdat%sig_dn(i)
     enddo
 
     do i=1,maxup
-        ! write(53,103) xsdat%sig_up(i,:)
+        write(53,103) xsdat%sig_up(i,:)
     enddo
     
     do i=1,groups
@@ -114,7 +114,7 @@ subroutine input_data_binary()
     allocate(xs(1))
     call allocate_xsdata(xs(1),groups,maxup)
     
-    open(unit=51,file='data_binary',action='read',form='unformatted')
+    open(unit=51,file='input_binary',action='read',form='unformatted')
     read(51) energy
     read(51) xs(1)%chi
     read(51) xs(1)%sigt
@@ -188,65 +188,20 @@ subroutine input_from_gendf()
             if (i==1) then
                 call readgendf('inputs/'//fname,energy=energy)
                 do j=1,groups
-                    flux(j)=1/energy(j)
+                    flux(j)=(energy(j-1)-energy(j))/energy(j-1)
                 enddo
             endif
             if (ifiss==1) then
 
                 call readgendf('inputs/'//fname,sigt=sigma_t, chi=chi0, &
-                    & vsigf=vsigma_f,sigs=sigma_scat,sigup=sigma_upsc)
-                
-                ! if (i==1) then
-                    ! write(*,*) fname, numdens
-                    ! open(unit=32,file='dil_238',action='read')
-                    ! do j=1,maxup
-                        ! read(32,*)
-                        ! read(32,*)
-                        ! read(32,*)
-                        ! read(32,*)
-                    ! enddo
-                    ! do j=groups-maxup,1,-1
-                        ! read(32,'(11X,1E9.0)') sigma_t(j)
-                        ! read(32,*)
-                        ! read(32,*)
-                        ! read(32,*)
-                    ! enddo
-                    ! read(32,*)
-                    ! do j=groups,1,-1
-                        ! read(32,'(2E10.0)') sigf
-                        ! vsigma_f(j) = vsigma_f(j)*sigf(2)/sigf(1)
-                    ! enddo
-                    ! close(unit=32)
-                                          
-                ! elseif (i==2) then
-                    ! write(*,*) fname, numdens
-                    ! open(unit=32,file='dil_235',action='read')
-                    ! do j=1,maxup
-                        ! read(32,*)
-                        ! read(32,*)
-                        ! read(32,*)
-                        ! read(32,*)
-                    ! enddo
-                    ! do j=groups-maxup,1,-1
-                        ! read(32,'(11X,1E9.0)') sigma_t(j)
-                        ! read(32,*)
-                        ! read(32,*)
-                        ! read(32,*)
-                    ! enddo
-                    ! read(32,*)
-                    ! do j=groups,1,-1
-                        ! read(32,'(2E10.0)') sigf
-                        ! vsigma_f(j) = vsigma_f(j)*sigf(2)/sigf(1)
-                    ! enddo
-                    ! close(unit=32)
-                ! endif
-                
+                    & vsigf=vsigma_f,sigs=sigma_scat,sigup=sigma_upsc)               
                 
                 xs(mat)%sigt = xs(mat)%sigt+numdens*sigma_t
                 xs(mat)%vsigf = xs(mat)%vsigf+numdens*vsigma_f
                 xs(mat)%sig_up = xs(mat)%sig_up+numdens*sigma_upsc
                 xs(mat)%sig_dn = xs(mat)%sig_dn+numdens*sigma_scat
-                xs(mat)%chi = xs(mat)%chi+numdens*dot_product(vsigma_f,flux)*chi0
+!~                 xs(mat)%chi = xs(mat)%chi+numdens*dot_product(vsigma_f,flux)*chi0
+                xs(mat)%chi = chi0
             else
                 call readgendf('inputs/'//fname,sigt=sigma_t, &
                     & sigs=sigma_scat,sigup=sigma_upsc)
@@ -272,6 +227,32 @@ subroutine input_from_gendf()
     
 
 end subroutine input_from_gendf
+
+!==============================================================================
+
+subroutine input_my_xs()
+    implicit none
+    
+    allocate(xs(2))
+    call allocate_xsdata(xs(1),3,3)
+    xs(1)%sigt = (/.5,1.,1.5/)
+    xs(1)%vsigf = (/.1,.1,1./)
+    xs(1)%chi = (/.9,.1,0/)
+    xs(1)%sig_dn = 0.0
+    xs(1)%sig_up(1,:) = (/.3,0.,0./)
+    xs(1)%sig_up(2,:) = (/.1,.5,.1/)
+    xs(1)%sig_up(3,:) = (/0.,.2,.5/)
+    
+    call allocate_xsdata(xs(2),3,3)
+    xs(2)%sigt = (/1.,1.5,2./)
+    xs(2)%vsigf = (/.1,1.,2./)
+    xs(2)%chi = (/.9,.1,0/)
+    xs(2)%sig_dn = 0.0
+    xs(2)%sig_up(1,:) = (/.5,0.,0./)
+    xs(2)%sig_up(2,:) = (/.2,.5,.1/)
+    xs(2)%sig_up(3,:) = (/.1,.5,1./)
+    
+end subroutine input_my_xs
 
 !==============================================================================
 

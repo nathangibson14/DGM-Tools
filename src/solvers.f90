@@ -1,6 +1,6 @@
 module solvers
 use nuclear_data
-use timer
+use dgm_timer
 
 real(kind=8) :: k_inf
 
@@ -19,9 +19,11 @@ subroutine inf_medium_power(xsdat, flux)
     real(kind=8) :: k_old
     
     integer :: i,j,ii,jj, iter
-    real(kind=8), dimension(xsdat%maxscat) :: A
+    real(kind=8), dimension(:), allocatable :: A
     real(kind=8), dimension(xsdat%groups) :: b
     real(kind=8), dimension(xsdat%maxup,xsdat%maxup) :: AA
+
+    allocate(A(xsdat%maxscat))
     
     k_old=1.0
     flux0=1.0
@@ -147,7 +149,8 @@ subroutine inf_medium_source(xsdat, maxiter, check_conv, flux)
         enddo
         
         ! update eigenvalue
-        k_inf = k_old*dot_product(xsdat%vsigf,flux)/dot_product(xsdat%vsigf,flux0)
+        ! k_inf = k_old*dot_product(xsdat%vsigf,flux)/dot_product(xsdat%vsigf,flux0)
+        k_inf = k_old
         
         flux=flux/sum(flux)
         
@@ -177,23 +180,34 @@ subroutine sn_solver(xsdat, meshes, width, matl, N, BC, diff_scheme, k_out, aflu
     real(kind=8), dimension(:), allocatable :: mu, wgt
     real(kind=8), dimension(:), allocatable :: dx
     
-    real(kind=8), dimension(sum(meshes)+1,xsdat(1)%groups,N) :: ang_flux, ang_flux_old
+!~     real(kind=8), dimension(sum(meshes)+1,xsdat(1)%groups,N) :: ang_flux, ang_flux_old
+    real(kind=8), dimension(:,:,:), allocatable :: ang_flux, ang_flux_old
     real(kind=8), dimension(sum(meshes)+1,xsdat(1)%groups,N), intent(out), optional :: aflux
-    real(kind=8), dimension(sum(meshes),xsdat(1)%groups):: scal_flux, scal_flux_old
+!~     real(kind=8), dimension(sum(meshes),xsdat(1)%groups):: scal_flux, scal_flux_old
+    real(kind=8), dimension(:,:), allocatable :: scal_flux, scal_flux_old
     real(kind=8), dimension(sum(meshes),xsdat(1)%groups), intent(out), optional :: flux
     real(kind=8) :: k_eff, k_old
     real(kind=8), intent(out), optional :: k_out
     
     real(kind=8), dimension(sum(meshes)) :: S_f0
     integer, dimension(sum(meshes)) :: regID, matID
-    real(kind=8), dimension(sum(meshes),xsdat(1)%groups) :: S_f, S_ds
-    real(kind=8), dimension(sum(meshes),xsdat(1)%maxup) :: S_us
+!~     real(kind=8), dimension(sum(meshes),xsdat(1)%groups) :: S_f, S_ds
+!~     real(kind=8), dimension(sum(meshes),xsdat(1)%maxup) :: S_us
+    real(kind=8), dimension(:,:), allocatable :: S_f, S_ds
+    real(kind=8), dimension(:,:), allocatable :: S_us
     real(kind=8) :: RR_f, Q, smu, denom
-    real(kind=8), dimension(sum(meshes),xsdat(1)%groups,N) :: A, B
+!~     real(kind=8), dimension(sum(meshes),xsdat(1)%groups,N) :: A, B
+    real(kind=8), dimension(:,:,:), allocatable :: A,B
     real(kind=8), dimension(N) :: alpha
     integer :: power_iter, source_iter, upsc_iter, g, g_up
     integer :: i, j, ii, gg, maxgg
     
+    allocate(S_f(sum(meshes),xsdat(1)%groups), S_ds(sum(meshes),xsdat(1)%groups))
+    allocate(S_us(sum(meshes),xsdat(1)%maxup))
+    allocate(A(sum(meshes),xsdat(1)%groups,N), B(sum(meshes),xsdat(1)%groups,N))
+    allocate(ang_flux(sum(meshes)+1,xsdat(1)%groups,N),ang_flux_old(sum(meshes)+1,xsdat(1)%groups,N))
+    allocate(scal_flux(sum(meshes),xsdat(1)%groups),scal_flux_old(sum(meshes),xsdat(1)%groups))
+  
     ! weights and angles
     if (N==2) then
         allocate(mu(2), wgt(2))
@@ -353,7 +367,7 @@ subroutine sn_solver(xsdat, meshes, width, matl, N, BC, diff_scheme, k_out, aflu
       
         enddo group_sweep_down
         
-        !write(*,*) '    starting upscatter block        ', read_timer()
+        ! write(*,*) '    starting upscatter block        ', read_timer()
         ! build downscatter scource
         do g=xsdat(1)%groups-xsdat(1)%maxup+1,xsdat(1)%groups
             S_ds(:,g)=0.0
@@ -365,7 +379,7 @@ subroutine sn_solver(xsdat, meshes, width, matl, N, BC, diff_scheme, k_out, aflu
             enddo
         enddo
         
-        upsc_iter_loop: do upsc_iter=1,1
+        upsc_iter_loop: do upsc_iter=1,100
 
             group_sweep_up: do g_up=1,xsdat(1)%maxup
                 do i=1,sum(meshes)

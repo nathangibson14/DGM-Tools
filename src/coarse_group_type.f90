@@ -1,6 +1,6 @@
 module coarse_group_type
 use nuclear_data
-use DLP_type
+use DCT_type
 
 type coarse_group
     integer :: N, mingroup, index, up_index
@@ -26,8 +26,8 @@ subroutine input_coarse_groups()
     integer :: mingroup
     logical :: is_unique
 
-    open(unit=11,file='inputs/energy_input',action='read')
-    read(11,*) groups, coarse_groups, upsc_groups
+    open(unit=17,file='inputs/energy_input',action='read')
+    read(17,*) groups, coarse_groups, upsc_groups
     maxup=0
     maxscat=groups*(groups+1)/2
 
@@ -36,12 +36,12 @@ subroutine input_coarse_groups()
     mingroup=1
     do i=1,coarse_groups
         is_unique = .true.
-        read(11,*) CG(i)%N
+        read(17,*) CG(i)%N
         CG(i)%mingroup=mingroup
         mingroup=mingroup+CG(i)%N
         
         ! check if same length DLPs have already been generated
-        ! if so, point to DLP rather than generate redundant
+        ! if so, point to DLP rather than generate redundancy
         unique: do j=1,i-1
             if (CG(i)%N == CG(j)%N) then
                 CG(i)%DLP%values => CG(j)%DLP%values
@@ -88,10 +88,12 @@ subroutine flux_moments(cgroup, flux, aflux)
     do region=1,size(aflux,1)
     
         ! condense coarse group scalar flux
-        cgroup%scal_flux(region)=0.0
-        do K=0,N
-            cgroup%scal_flux(region) = cgroup%scal_flux(region)+flux(region,cgroup%mingroup+K)
-        enddo
+        if (region < size(aflux,1)) then
+            cgroup%scal_flux(region)=0.0
+            do K=0,N
+                cgroup%scal_flux(region) = cgroup%scal_flux(region)+flux(region,cgroup%mingroup+K)
+            enddo
+        endif
         
         ! expand angular flux
         cgroup%ang_flux(region,:,:)=0.0
@@ -179,7 +181,7 @@ subroutine data_moments(cgroup, xsdat, flux, aflux)
     real(kind=8), dimension(:,:), allocatable :: delta_g        ! (region, group)
     
     N=cgroup%N-1
-    regions=size(aflux,1)
+    regions=size(aflux,1)-1
     allocate(delta_g(regions,0:N))
         
     do region=1,regions
@@ -283,6 +285,9 @@ subroutine scat_moments_down(origin, destination, xsdat, flux)
         destination%sig_dn(region,:,origin%index)= &
             & destination%sig_dn(region,:,origin%index)/origin%scal_flux(region)
 
+        !destination%sig_dn(region,1:N,origin%index) = 0.0
+
+
     enddo
     
 end subroutine scat_moments_down
@@ -327,6 +332,8 @@ subroutine scat_moments_up(origin, destination, xsdat, flux)
         enddo
         destination%sig_up(region,:,origin%up_index)= &
             & destination%sig_up(region,:,origin%up_index)/origin%scal_flux(region)
+            
+        !destination%sig_up(region,1:N,origin%up_index) = 0.0
             
     enddo
 
